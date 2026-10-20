@@ -39,3 +39,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# DayLog: 本地配置和密钥，不要提交
+.env
+backend/.env
+backend/.venv/
+__pycache__/
+.pytest_cache/

@@ -1,13 +1,14 @@
 {
   "expo": {
-    "name": "daylog",
+    "name": "DayLog",
     "slug": "daylog",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.difei.daylog"
     },
     "android": {
       "adaptiveIcon": {
@@ -20,6 +21,25 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "scheme": "daylog",
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "DayLog 会读取你某一天拍的照片，用照片的时间和地点生成当天的回顾。照片只在手机上处理，不会上传。",
+          "savePhotosPermission": false,
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "DayLog 用位置把照片里的坐标转换成地名。"
+        }
+      ]
+    ]
   }
 }
