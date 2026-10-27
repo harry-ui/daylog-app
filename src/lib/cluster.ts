@@ -29,6 +29,10 @@ export type ClusterOptions = {
   maxDistanceM?: number;
   /** 两张照片间隔超过这个时间（毫秒）就切开 */
   maxGapMs?: number;
+  /** 夹在同一个地方中间、照片不超过这么多张的停留点，当成 GPS 漂移合并掉 */
+  outlierMaxPhotos?: number;
+  /** 而且前后两段之间隔得不超过这么久（毫秒）。真的出门绕一圈一般会更久 */
+  outlierMaxMs?: number;
 };
 
 const EARTH_RADIUS_M = 6_371_000;
@@ -48,6 +52,32 @@ function centroid(photos: PhotoPoint[]): { lat: number | null; lon: number | nul
   const lat = located.reduce((s, p) => s + (p.lat as number), 0) / located.length;
   const lon = located.reduce((s, p) => s + (p.lon as number), 0) / located.length;
   return { lat, lon };
+}
+
+// 手机定位偶尔会跳到几百米甚至几公里外，一张漂移的照片会把 A 切成 A、B、A 三段。
+// 这里找出这种"前后是同一个地方、中间只有一两张、而且时间很短"的段，把它并回去。
+// 被并回去的照片去掉坐标，不让漂移的位置把中心点拉偏。
+function mergeOutliers(groups: PhotoPoint[][], opts: ClusterOptions, maxDistanceM: number): PhotoPoint[][] {
+  const outlierMaxPhotos = opts.outlierMaxPhotos ?? 1;
+  const outlierMaxMs = opts.outlierMaxMs ?? 20 * 60 * 1000;
+
+  const out: PhotoPoint[][] = [];
+  for (const g of groups) {
+    out.push(g);
+    while (out.length >= 3) {
+      const [a, b, c] = out.slice(-3);
+      const ca = centroid(a);
+      const cc = centroid(c);
+      const isBlip =
+        b.length <= outlierMaxPhotos &&
+        c[0].time - a[a.length - 1].time <= outlierMaxMs &&
+        ca.lat != null && ca.lon != null && cc.lat != null && cc.lon != null &&
+        haversineM(ca.lat, ca.lon, cc.lat, cc.lon) <= maxDistanceM;
+      if (!isBlip) break;
+      out.splice(-3, 3, [...a, ...b.map((p) => ({ ...p, lat: null, lon: null })), ...c]);
+    }
+  }
+  return out;
 }
 
 export function clusterIntoStops(photos: PhotoPoint[], opts: ClusterOptions = {}): Stop[] {
@@ -77,7 +107,7 @@ export function clusterIntoStops(photos: PhotoPoint[], opts: ClusterOptions = {}
     else current.push(photo);
   }
 
-  return groups.map((g, i) => {
+  return mergeOutliers(groups, opts, maxDistanceM).map((g, i) => {
     const c = centroid(g);
     return {
       id: `stop-${i}`,

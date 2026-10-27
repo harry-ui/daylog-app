@@ -55,6 +55,26 @@ test('全部没有定位', () => {
   assert.equal(stops[0].lat, null);
 });
 
+test('中间一张定位漂移的照片不会把同一个地方切成三段', () => {
+  const FAR = { lat: 42.3601, lon: -71.0589 }; // 漂到了 3 公里外
+  const stops = clusterIntoStops([p('a', 0, BU), p('b', 5, BU), p('x', 8, FAR), p('c', 12, BU)]);
+  assert.equal(stops.length, 1);
+  assert.deepEqual(stops[0].photos.map((x) => x.id), ['a', 'b', 'x', 'c']);
+  // 漂移的那张不参与算中心点
+  assert.ok(Math.abs((stops[0].lat as number) - BU.lat) < 1e-9);
+});
+
+test('连续两次漂移也能合并', () => {
+  const FAR = { lat: 42.3601, lon: -71.0589 };
+  const stops = clusterIntoStops([p('a', 0, BU), p('x', 3, FAR), p('b', 6, BU), p('y', 9, BPL), p('c', 12, BU)]);
+  assert.equal(stops.length, 1);
+});
+
+test('真的出去了一趟（时间够长）不会被当成漂移', () => {
+  const stops = clusterIntoStops([p('a', 0, BU), p('b', 45, BPL), p('c', 90, BU)]);
+  assert.equal(stops.length, 3);
+});
+
 test('空数组', () => {
   assert.deepEqual(clusterIntoStops([]), []);
 });

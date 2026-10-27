@@ -6,6 +6,7 @@
     "@expo/metro-runtime": "~58.0.14",
     "expo": "~58.0.16",
     "expo-constants": "~58.0.12",
+    "expo-image": "~58.0.16",
     "expo-linking": "~58.0.13",
     "expo-location": "~58.0.18",
     "expo-media-library": "~58.0.11",
@@ -14,6 +15,7 @@
     "expo-status-bar": "~58.0.3",
     "expo-symbols": "~58.0.4",
     "react": "19.3.0",
+    "react-dom": "19.3.0",
     "react-native": "0.88.0",
     "react-native-maps": "^1.29.11",
     "react-native-safe-area-context": "~5.10.1",
@@ -29,7 +31,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/lib/cluster.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/cluster.test.ts src/lib/sample.test.ts"
   },
   "private": true
 }

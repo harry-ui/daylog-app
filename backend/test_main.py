@@ -2,7 +2,10 @@
 
 import os
 
+import pytest
+
 os.environ["ANTHROPIC_API_KEY"] = ""  # 测试用 mock 模式，不花钱
+os.environ["DAYLOG_API_TOKEN"] = ""
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -10,7 +13,13 @@ import main  # noqa: E402
 from prompt import build_user_message  # noqa: E402
 
 main.API_KEY = ""
+main.API_TOKEN = ""
 client = TestClient(main.app)
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit():
+    main._recent.clear()
 
 SAMPLE = {
     "date": "2026-10-18",
@@ -74,11 +83,31 @@ def test_generate_llm_path(monkeypatch):
             self.messages = FakeMessages()
 
     monkeypatch.setattr(main, "API_KEY", "test-key")
+    monkeypatch.setattr(main, "API_TOKEN", "secret")
     monkeypatch.setattr(anthropic, "Anthropic", FakeClient)
 
-    r = client.post("/generate", json=SAMPLE)
+    r = client.post("/generate", json=SAMPLE, headers={"Authorization": "Bearer secret"})
     assert r.status_code == 200
     assert r.json() == {"text": "下午在图书馆待了很久。", "mock": False}
     assert captured["model"] == main.MODEL
     assert captured["system"] == main.SYSTEM_PROMPT
     assert "Boston Public Library" in captured["messages"][0]["content"]
+
+
+def test_token_required_when_set(monkeypatch):
+    monkeypatch.setattr(main, "API_TOKEN", "secret")
+    assert client.post("/generate", json=SAMPLE).status_code == 401
+    assert client.post("/generate", json=SAMPLE, headers={"Authorization": "Bearer wrong"}).status_code == 401
+    assert client.post("/generate", json=SAMPLE, headers={"Authorization": "Bearer secret"}).status_code == 200
+
+
+def test_llm_mode_refuses_without_token(monkeypatch):
+    """有 API Key 却没设 token：不能让同一个 Wi-Fi 里的人随便花你的钱。"""
+    monkeypatch.setattr(main, "API_KEY", "test-key")
+    assert client.post("/generate", json=SAMPLE).status_code == 503
+
+
+def test_rate_limit(monkeypatch):
+    monkeypatch.setattr(main, "RATE_LIMIT", 3)
+    codes = [client.post("/generate", json=SAMPLE).status_code for _ in range(4)]
+    assert codes == [200, 200, 200, 429]

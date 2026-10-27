@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,7 +12,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Image } from 'expo-image';
+import { Stack, useLocalSearchParams, usePreventRemove } from 'expo-router';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { presentPermissionsPicker } from 'expo-media-library';
 import { clusterIntoStops, type Stop } from '../../lib/cluster';
@@ -37,6 +37,7 @@ export default function DayScreen() {
   const [errorMsg, setErrorMsg] = useState('');
   const [permission, setPermission] = useState<PhotoPermission>('all');
   const [stops, setStops] = useState<Stop[]>([]);
+  const [sampledFrom, setSampledFrom] = useState(0); // 抽样前的照片总数，没抽样时为 0
   const [emotions, setEmotions] = useState<string[]>([]);
   const [note, setNote] = useState('');
   const [style, setStyle] = useState('diary');
@@ -67,11 +68,12 @@ export default function DayScreen() {
           setPhase('denied');
           return;
         }
-        const photos = await loadPhotosForDay(date);
+        const { photos, total, sampled } = await loadPhotosForDay(date);
         const clustered = clusterIntoStops(photos);
         // 先显示没有地名的时间线，地名查完再更新，用户不用干等
         if (!cancelled) {
           setStops(clustered);
+          setSampledFrom(sampled ? total : 0);
           setPhase('ready');
         }
         const named = await nameStops(clustered);
@@ -91,6 +93,27 @@ export default function DayScreen() {
   const located = stops.filter((x) => x.lat != null && x.lon != null) as (Stop & { lat: number; lon: number })[];
   const coords = located.map((x) => ({ latitude: x.lat, longitude: x.lon }));
   const photoCount = stops.reduce((n, x) => n + x.photos.length, 0);
+
+  // 有没保存的修改时，返回（包括 iOS 侧滑返回）先问一下，免得生成的文字白白丢掉
+  usePreventRemove(dirty, ({ repeat }) => {
+    Alert.alert('还没保存', '现在离开的话，这次的修改会丢掉。', [
+      { text: '继续编辑', style: 'cancel' },
+      {
+        text: '不保存',
+        style: 'destructive',
+        onPress: () => {
+          setDirty(false);
+          repeat();
+        },
+      },
+      {
+        text: '保存',
+        onPress: async () => {
+          if (await onSave()) repeat();
+        },
+      },
+    ]);
+  });
 
   function toggleEmotion(w: string) {
     setDirty(true);
@@ -118,7 +141,8 @@ export default function DayScreen() {
     }
   }
 
-  async function onSave() {
+  /** 保存成功返回 true */
+  async function onSave(): Promise<boolean> {
     try {
       await saveEntry({
         date,
@@ -137,8 +161,10 @@ export default function DayScreen() {
       });
       setDirty(false);
       setSavedOnce(true);
+      return true;
     } catch (e) {
       Alert.alert('保存失败', (e as Error).message);
+      return false;
     }
   }
 
@@ -190,6 +216,11 @@ export default function DayScreen() {
                 ? '这一天没有找到照片。'
                 : `${photoCount} 张照片 · ${stops.length} 个停留点${located.length < stops.length ? ` · ${stops.length - located.length} 个没有定位` : ''}`}
             </Text>
+            {sampledFrom > 0 && (
+              <Text style={s.sub}>
+                这一天有 {sampledFrom} 张照片，太多了，所以在一整天里均匀挑了一部分来整理地点。
+              </Text>
+            )}
 
             {coords.length > 0 && (
               <MapView
@@ -228,7 +259,7 @@ export default function DayScreen() {
                 </View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                   {x.photos.slice(0, 12).map((p) => (
-                    <Image key={p.id} source={{ uri: p.uri }} style={s.thumb} />
+                    <Image key={p.id} source={{ uri: p.uri }} style={s.thumb} contentFit="cover" recyclingKey={p.id} />
                   ))}
                 </ScrollView>
               </View>

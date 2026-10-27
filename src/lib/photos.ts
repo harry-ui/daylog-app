@@ -1,6 +1,7 @@
 // 读取某一天相册里的照片（时间 + GPS），全部在手机本地完成。
-import { Query, AssetField, MediaType, MediaSubtype, requestPermissionsAsync } from 'expo-media-library';
+import { Asset, Query, AssetField, MediaType, MediaSubtype, requestPermissionsAsync } from 'expo-media-library';
 import type { PhotoPoint } from './cluster';
+import { sampleEvenly } from './sample';
 
 export type PhotoPermission = 'all' | 'limited' | 'denied';
 
@@ -27,28 +28,43 @@ function toMs(t: number | null): number | null {
   return t < 1e12 ? t * 1000 : t;
 }
 
-export async function loadPhotosForDay(date: string, maxPhotos = 200): Promise<PhotoPoint[]> {
+/** 一天最多读这么多张照片的定位，再多就均匀抽样 */
+export const MAX_PHOTOS_PER_DAY = 200;
+
+export type DayPhotos = {
+  photos: PhotoPoint[];
+  /** 当天一共有多少张照片（不算截图） */
+  total: number;
+  /** total 超过上限，photos 是抽样出来的 */
+  sampled: boolean;
+};
+
+export async function loadPhotosForDay(date: string, maxPhotos = MAX_PHOTOS_PER_DAY): Promise<DayPhotos> {
   const { start, end } = dayRange(date);
 
-  const assets = await new Query()
+  // 先只读轻量的元数据（不解析文件、不读定位），拿到当天的全部照片
+  const all = await new Query()
     .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
     .gte(AssetField.CREATION_TIME, start)
     .lt(AssetField.CREATION_TIME, end)
     .orderBy({ key: AssetField.CREATION_TIME, ascending: true })
-    .limit(maxPhotos)
-    .exe();
+    .exeForMetadata();
+
+  // 截图一般不代表"去了哪里"，跳过（mediaSubtypes 只有 iOS 有）
+  const candidates = all.filter((m) => !m.mediaSubtypes?.includes(MediaSubtype.SCREENSHOT));
+  // 照片太多时在一整天里均匀抽，而不是只取前面的，免得晚上去的地方整个消失
+  const picked = sampleEvenly(candidates, maxPhotos);
 
   const points = await Promise.all(
-    assets.map(async (asset): Promise<PhotoPoint | null> => {
+    picked.map(async (m): Promise<PhotoPoint | null> => {
+      const time = toMs(m.creationTime);
+      if (time == null) return null;
       try {
-        const [info, location] = await Promise.all([asset.getInfo(), asset.getLocation()]);
-        const time = toMs(info.creationTime);
-        if (time == null) return null;
-        // 截图一般不代表"去了哪里"，跳过
-        if (info.mediaSubtypes?.includes(MediaSubtype.SCREENSHOT)) return null;
+        const asset = new Asset(m.id);
+        const [uri, location] = await Promise.all([asset.getUri(), asset.getLocation()]);
         return {
-          id: asset.id,
-          uri: info.uri,
+          id: m.id,
+          uri,
           time,
           lat: location?.latitude ?? null,
           lon: location?.longitude ?? null,
@@ -60,5 +76,9 @@ export async function loadPhotosForDay(date: string, maxPhotos = 200): Promise<P
     }),
   );
 
-  return points.filter((p): p is PhotoPoint => p !== null);
+  return {
+    photos: points.filter((p): p is PhotoPoint => p !== null),
+    total: candidates.length,
+    sampled: picked.length < candidates.length,
+  };
 }
